@@ -142,6 +142,26 @@ public final class AiKeys {
     /** Type: {@link HiveMemory}. Shared hive state read by wander (dark preference) and hive-building actions. */
     public static final BlackboardKey<HiveMemory> HIVE_MEMORY = BlackboardKey.of("hive_memory", HiveMemory.class);
 
+    /**
+     * Type: {@link Integer}. Consecutive {@code EXPAND_HIVE} failures due to {@code FAILED_NO_PATH}/
+     * {@code FAILED_STUCK}/{@code FAILED_BLOCKED} (i.e. the hive itself — or a breach in it — was physically
+     * unreachable, as opposed to just having no candidate blocks nearby). {@link XenomorphGoalPlanner} escalates the
+     * goal's suppression window with this streak so a hive that's genuinely out of reach (spawned far away, sealed
+     * behind maze geometry the mob can't path through) stops pulling the mob back into the same failed attempt every
+     * few seconds forever. Reset to 1 (a fresh streak) whenever {@link #HIVE_STUCK_LAST_FAIL_TICK} is stale enough that
+     * the mob evidently hasn't been actively failing this whole time.
+     */
+    public static final BlackboardKey<Integer> HIVE_STUCK_STREAK = BlackboardKey.of(
+        "hive_stuck_streak",
+        Integer.class
+    );
+
+    /** Type: {@link Integer}. Game tick of the most recent {@link #HIVE_STUCK_STREAK}-incrementing failure. */
+    public static final BlackboardKey<Integer> HIVE_STUCK_LAST_FAIL_TICK = BlackboardKey.of(
+        "hive_stuck_last_fail_tick",
+        Integer.class
+    );
+
     /** Type: {@link Boolean}. {@code true} when target is within 20 blocks of the nearest resin web cross. */
     public static final BlackboardKey<Boolean> TARGET_IS_NEAR_HIVE = BlackboardKey.of(
         "target_is_near_hive",

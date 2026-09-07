@@ -45,6 +45,8 @@ public final class XenomorphCombatAction<E extends Mob, G> implements Action<E, 
 
     private int circleDir = 1;
 
+    private final int[] stalkSteerBias = { 0 };
+
     /**
      * Consecutive times this action has bailed into {@link Phase#THREAT_RESPONSE} without landing a strike in between.
      * THREAT_RESPONSE never transitions back into STRIKE on its own — it just circles and then ends the action (success
@@ -77,6 +79,7 @@ public final class XenomorphCombatAction<E extends Mob, G> implements Action<E, 
         phaseAge = 0;
         didStrike = false;
         stalkLateralBias = mob.getRandom().nextBoolean() ? 1 : -1;
+        stalkSteerBias[0] = 0;
         wasCrawlingOnStart = CrawlController.wasRecentlyWallCrawling(mob);
         mob.hasImpulse = true;
 
@@ -269,15 +272,25 @@ public final class XenomorphCombatAction<E extends Mob, G> implements Action<E, 
         return target.getLookAngle().dot(toMob) > 0.5D;
     }
 
+    /**
+     * Applies {@code desired} (the STALK phase's lateral-circling approach vector) with obstacle steering, the same way
+     * {@link #tickCircleOut} already steers its own movement — {@code desired} previously reached
+     * {@link Mob#setDeltaMovement} completely unclamped whenever no dangerous entity was nearby to steer away from,
+     * which is the common case. STALK's lateral bias has no notion of walls, so in a corridor it would happily aim the
+     * mob straight into one; without ever routing that vector through {@link MovementController#findSafeMovement} (as
+     * every other movement-producing phase here does), nothing ever corrected it, and the mob would shove against the
+     * wall until {@code phaseAge} eventually forced a phase change.
+     */
     private void applyDangerSteering(E mob, Vec3 desired) {
         var danger = MovementController.steerAwayFromDangerEntities(mob, Vec3.ZERO);
-        Vec3 result;
+        Vec3 candidate;
         if (danger.lengthSqr() > 0.0001D) {
-            var safe = MovementController.findSafeMovement(mob, danger, new int[] { 0 });
-            result = safe.equals(Vec3.ZERO) ? danger : safe;
+            candidate = danger;
         } else {
-            result = desired;
+            candidate = desired;
         }
+        var safe = MovementController.findSafeMovement(mob, candidate, stalkSteerBias);
+        var result = safe.equals(Vec3.ZERO) ? candidate : safe;
         mob.setDeltaMovement(result.x, mob.getDeltaMovement().y, result.z);
         mob.hasImpulse = true;
     }
