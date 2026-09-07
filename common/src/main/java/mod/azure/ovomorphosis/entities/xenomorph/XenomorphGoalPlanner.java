@@ -170,6 +170,27 @@ public final class XenomorphGoalPlanner implements GoalPlanner<XenomorphEntity, 
 
     private static final float EMERGENCY_SCORE_THRESHOLD = 85f;
 
+    /**
+     * Base suppression window (ticks) for an {@code EXPAND_HIVE} failure caused by the hive (or a known breach)
+     * actually being physically unreachable ({@code FAILED_NO_PATH}/{@code FAILED_STUCK}/{@code FAILED_BLOCKED}), at
+     * streak 1. Multiplied by {@link AiKeys#HIVE_STUCK_STREAK} for each consecutive such failure — see that key's docs
+     * for why a single fixed window isn't enough on its own.
+     */
+    private static final int HIVE_STUCK_BASE_COOLDOWN_TICKS = 100;
+
+    /** Ceiling on the escalated cooldown from {@link #HIVE_STUCK_BASE_COOLDOWN_TICKS}, regardless of streak length. */
+    private static final int HIVE_STUCK_MAX_COOLDOWN_TICKS = 1200;
+
+    /** Ceiling on {@link AiKeys#HIVE_STUCK_STREAK} itself — matches {@link #HIVE_STUCK_MAX_COOLDOWN_TICKS}. */
+    private static final int HIVE_STUCK_MAX_STREAK = HIVE_STUCK_MAX_COOLDOWN_TICKS / HIVE_STUCK_BASE_COOLDOWN_TICKS;
+
+    /**
+     * If more than this many ticks have passed since {@link AiKeys#HIVE_STUCK_LAST_FAIL_TICK}, the next failure starts
+     * a fresh streak instead of extending the old one — the gap means the mob evidently hasn't been stuck in a retry
+     * loop this whole time (it either succeeded, or simply hasn't attempted {@code EXPAND_HIVE} in a while).
+     */
+    private static final int HIVE_STUCK_STREAK_RESET_TICKS = 300;
+
     @Override
     public PlannedGoal<XenomorphEntity, AiGoalType> chooseGoal(
         XenomorphEntity mob,
@@ -364,7 +385,8 @@ public final class XenomorphGoalPlanner implements GoalPlanner<XenomorphEntity, 
                         gfc.recordFailure(AiGoalType.AMBUSH_TARGET, tick, 120);
                     }
                     if (failedGoal == AiGoalType.EXPAND_HIVE) {
-                        gfc.recordFailure(AiGoalType.EXPAND_HIVE, tick, 100);
+                        hiveScore -= PENALTY_FAILED;
+                        recordHiveStuckFailure(blackboard, gfc, tick);
                     }
                 }
                 case FAILED_TARGET_LOST -> {
@@ -742,6 +764,30 @@ public final class XenomorphGoalPlanner implements GoalPlanner<XenomorphEntity, 
             return PlanFeedback.of(raw, tick, null, activeGoal != null ? activeGoal : AiGoalType.NONE);
         }
         return null;
+    }
+
+    /**
+     * Records a physically-unreachable-hive {@code EXPAND_HIVE} failure, escalating the goal's suppression window on
+     * each consecutive occurrence (see {@link AiKeys#HIVE_STUCK_STREAK}'s docs) instead of always reapplying the same
+     * fixed window. Without this, a hive that's genuinely out of reach — spawned far away, sealed behind maze geometry
+     * the mob can't path through — got retried on essentially the same short cadence forever: the fixed window decayed
+     * to nothing well before anything about the mob's situation had changed, so {@code EXPAND_HIVE} simply won again on
+     * the next planning cycle and failed the same way.
+     */
+    private static void recordHiveStuckFailure(Blackboard blackboard, GoalFailureCooldowns<Object> gfc, int tick) {
+        var lastFailTick = blackboard.get(AiKeys.HIVE_STUCK_LAST_FAIL_TICK);
+        var priorStreak = blackboard.get(AiKeys.HIVE_STUCK_STREAK);
+
+        var streak = (lastFailTick == null || priorStreak == null || tick
+            - lastFailTick > HIVE_STUCK_STREAK_RESET_TICKS)
+                ? 1
+                : Math.min(HIVE_STUCK_MAX_STREAK, priorStreak + 1);
+
+        blackboard.set(AiKeys.HIVE_STUCK_STREAK, streak);
+        blackboard.set(AiKeys.HIVE_STUCK_LAST_FAIL_TICK, tick);
+
+        var duration = Math.min(HIVE_STUCK_MAX_COOLDOWN_TICKS, HIVE_STUCK_BASE_COOLDOWN_TICKS * streak);
+        gfc.recordFailure(AiGoalType.EXPAND_HIVE, tick, duration);
     }
 
     private static boolean isTargetFacingMob(LivingEntity target, XenomorphEntity mob) {
