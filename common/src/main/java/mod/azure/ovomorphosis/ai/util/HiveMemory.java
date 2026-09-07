@@ -6,6 +6,7 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.Tag;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.NotNull;
@@ -443,6 +444,96 @@ public final class HiveMemory {
         }
     }
 
+    /**
+     * Search radius (in blocks, horizontal axes) {@link #resolveOpenCenter} expands outward through when
+     * {@code preferred} itself doesn't qualify as a usable dome center.
+     */
+    private static final int CENTER_SEARCH_RADIUS = 12;
+
+    /** Vertical half-range {@link #resolveOpenCenter} searches, applied both above and below {@code preferred}. */
+    private static final int CENTER_SEARCH_VERTICAL_RADIUS = 6;
+
+    /**
+     * Vertical clearance, in blocks starting at the candidate position itself, that must all be diggable/replaceable
+     * for a position to count as open enough to serve as a dome center. This is what "the center of the dome area"
+     * actually needs to mean in practice: not merely a coordinate, but a spot with room to stand in and be reached,
+     * rather than one that happens to land inside solid rock or bedrock.
+     */
+    private static final int CENTER_HEADROOM = 3;
+
+    /**
+     * Finds the best available dome-center position at or near {@code preferred}: somewhere with enough open headroom
+     * to actually be reached and built around, instead of embedded in solid/unbreakable material. {@code preferred}
+     * (typically the claiming mob's own position) is checked first and returned as-is if it already qualifies, since
+     * that's the common case; otherwise this searches outward in expanding cubes up to {@link #CENTER_SEARCH_RADIUS}
+     * for the closest qualifying position. If nothing in range qualifies (e.g. the whole area is solid bedrock), falls
+     * back to {@code preferred} itself rather than failing outright — {@link #ensureCenterClear} still guarantees that
+     * fallback isn't left solid.
+     *
+     * @param level     the level to check block state against
+     * @param preferred the candidate center to prefer
+     * @return the chosen center, as an immutable position
+     */
+    public static BlockPos resolveOpenCenter(Level level, BlockPos preferred) {
+        var immutablePreferred = preferred.immutable();
+
+        if (isOpenEnoughForCenter(level, immutablePreferred))
+            return immutablePreferred;
+
+        BlockPos best = null;
+        var bestDistSq = Double.MAX_VALUE;
+
+        for (var x = -CENTER_SEARCH_RADIUS; x <= CENTER_SEARCH_RADIUS; x++) {
+            for (var y = -CENTER_SEARCH_VERTICAL_RADIUS; y <= CENTER_SEARCH_VERTICAL_RADIUS; y++) {
+                for (var z = -CENTER_SEARCH_RADIUS; z <= CENTER_SEARCH_RADIUS; z++) {
+                    var candidate = immutablePreferred.offset(x, y, z);
+
+                    if (!isOpenEnoughForCenter(level, candidate))
+                        continue;
+
+                    var distSq = candidate.distSqr(immutablePreferred);
+                    if (distSq < bestDistSq) {
+                        bestDistSq = distSq;
+                        best = candidate.immutable();
+                    }
+                }
+            }
+        }
+
+        return best != null ? best : immutablePreferred;
+    }
+
+    /**
+     * {@code true} if {@code pos} and {@link #CENTER_HEADROOM} blocks directly above it are all either naturally
+     * replaceable or otherwise diggable (i.e. not bedrock or another unbreakable block). Guards against a claimed dome
+     * center landing somewhere that can never actually be opened up into standable space.
+     */
+    private static boolean isOpenEnoughForCenter(Level level, BlockPos pos) {
+        for (var y = 0; y < CENTER_HEADROOM; y++) {
+            var check = pos.above(y);
+            var state = level.getBlockState(check);
+
+            if (state.canBeReplaced())
+                continue;
+
+            if (state.getDestroySpeed(level, check) < 0f)
+                return false;
+        }
+        return true;
+    }
+
+    /**
+     * Forces the block at {@code center} itself to air, guaranteeing a freshly claimed dome center is never left
+     * embedded inside a solid block. Every system that treats {@link #getDomeCenter()} as a destination — wandering
+     * back to the hive, tunnel-direction math, breach/light scans — assumes that exact position is standable/enterable,
+     * not just "somewhere in open space nearby".
+     */
+    public static void ensureCenterClear(Level level, BlockPos center) {
+        if (!level.getBlockState(center).isAir()) {
+            level.setBlockAndUpdate(center, Blocks.CAVE_AIR.defaultBlockState());
+        }
+    }
+
     /** @return {@code true} once the dome shell is considered fully built and tunnel-building should begin */
     public boolean isDomeComplete() {
         return domeComplete;
@@ -583,19 +674,24 @@ public final class HiveMemory {
 
     /**
      * Refreshes {@link #xenoCount}, {@link #ovomorphCount}, {@link #restrainedHostCount}, and {@link #hiveLightLevel}
-     * by scanning around the dome center — but only if {@link #NEEDS_RECOMPUTE_INTERVAL_TICKS} have passed since the
-     * last refresh. Safe to call every planning cycle from any xenomorph sharing this hive; the throttle is on the
-     * shared instance, so many mobs calling this frequently still only triggers one actual scan per interval.
+     * by scanning around the dome center, and re-validates the dome center itself — but only if
+     * {@link #NEEDS_RECOMPUTE_INTERVAL_TICKS} have passed since the last refresh. Safe to call every planning cycle
+     * from any xenomorph sharing this hive; the throttle is on the shared instance, so many mobs calling this
+     * frequently still only triggers one actual scan per interval.
      *
      * @param level       the level to scan (must be the hive's dimension)
      * @param currentTick the current game tick, used both to throttle and to evict stale threat records
+     * @return {@code true} if the dome center was moved/re-cleared this call — the caller should mark the owning save
+     *         data dirty so the repaired position actually persists
      */
-    public void recomputeNeedsIfDue(Level level, long currentTick) {
+    public boolean recomputeNeedsIfDue(Level level, long currentTick) {
         if (domeCenter == null)
-            return;
+            return false;
         if (currentTick - needsRecomputedAtTick < NEEDS_RECOMPUTE_INTERVAL_TICKS)
-            return;
+            return false;
         needsRecomputedAtTick = currentTick;
+
+        var centerRepaired = revalidateDomeCenterIfNeeded(level);
 
         var aabb = AABB.ofSize(
             Vec3.atCenterOf(domeCenter),
@@ -610,6 +706,28 @@ public final class HiveMemory {
         hiveLightLevel = computeHiveLightLevel(level);
 
         evictStaleThreats(currentTick);
+
+        return centerRepaired;
+    }
+
+    /**
+     * Re-checks the claimed {@link #domeCenter} against {@link #isOpenEnoughForCenter} and repairs it in place — via
+     * {@link #resolveOpenCenter} and {@link #ensureCenterClear} — if it no longer qualifies. Covers two cases: a center
+     * that was persisted before dome-center validation existed (loaded straight off disk by {@link #load} with no
+     * checks applied), and one that qualified when claimed but has since been buried again (terrain regen, a player
+     * filling it in, etc.). Piggybacks on {@link #recomputeNeedsIfDue}'s existing throttle rather than needing its own
+     * cooldown state, since a stale/buried center isn't something that needs checking every single tick.
+     *
+     * @return {@code true} if the center was actually moved/re-cleared
+     */
+    private boolean revalidateDomeCenterIfNeeded(Level level) {
+        if (domeCenter == null || isOpenEnoughForCenter(level, domeCenter))
+            return false;
+
+        var repaired = resolveOpenCenter(level, domeCenter);
+        ensureCenterClear(level, repaired);
+        domeCenter = repaired;
+        return true;
     }
 
     private int computeHiveLightLevel(Level level) {

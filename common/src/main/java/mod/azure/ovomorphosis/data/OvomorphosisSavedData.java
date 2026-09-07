@@ -62,7 +62,9 @@ public final class OvomorphosisSavedData extends SavedData {
             return nearest;
 
         var created = new HiveMemory();
-        created.claimDomeCenter(origin.immutable());
+        var center = HiveMemory.resolveOpenCenter(level, origin);
+        HiveMemory.ensureCenterClear(level, center);
+        created.claimDomeCenter(center);
 
         dimensionHives.add(created);
         data.setDirty();

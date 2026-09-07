@@ -227,11 +227,15 @@ public final class PlaceResinAction<E extends Mob, G> implements Action<E, G> {
     }
 
     /**
-     * Returns the shared dome center, claiming the mob's current position as that center if none exists yet.
+     * Returns the shared dome center, claiming a suitable position near the mob's current spot as that center if none
+     * exists yet. The claimed position is resolved via {@link HiveMemory#resolveOpenCenter} (so it isn't sealed inside
+     * solid/unbreakable terrain) and force-cleared via {@link HiveMemory#ensureCenterClear} before being claimed, so
+     * every subsequent user of {@link HiveMemory#getDomeCenter()} can rely on that exact position being reachable.
      */
     private BlockPos resolveDomeCenter(E mob, HiveMemory hiveMemory) {
         return hiveMemory.getDomeCenter().orElseGet(() -> {
-            var claimed = mob.blockPosition().immutable();
+            var claimed = HiveMemory.resolveOpenCenter(mob.level(), mob.blockPosition());
+            HiveMemory.ensureCenterClear(mob.level(), claimed);
             hiveMemory.claimDomeCenter(claimed);
             markHiveDirty(mob);
             return claimed;
