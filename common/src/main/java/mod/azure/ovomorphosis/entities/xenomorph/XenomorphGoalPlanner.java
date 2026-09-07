@@ -190,7 +190,10 @@ public final class XenomorphGoalPlanner implements GoalPlanner<XenomorphEntity, 
 
         var memory = blackboard.get(AiKeys.HIVE_MEMORY);
         if (memory != null) {
-            memory.recomputeNeedsIfDue(mob.level(), tick);
+            var centerRepaired = memory.recomputeNeedsIfDue(mob.level(), tick);
+            if (centerRepaired && mob.level() instanceof ServerLevel serverLevel) {
+                OvomorphosisSavedData.markHiveDirty(serverLevel);
+            }
         }
         var nearWeb = memory != null
             && memory.findNearestOwnedWebCross(mob.level(), mob.blockPosition(), 20.0D).isPresent();
