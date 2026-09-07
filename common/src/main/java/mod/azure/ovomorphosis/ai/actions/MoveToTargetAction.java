@@ -1221,7 +1221,12 @@ public final class MoveToTargetAction<E extends Mob, G> implements Action<E, G> 
                 ? Math.max(mob.getDeltaMovement().y, climbBoost)
                 : mob.getDeltaMovement().y;
 
-            mob.setDeltaMovement(movement.x, yVel, movement.z);
+            var safeFluidMove = MovementController.findSafeMovement(mob, movement, steerBias);
+            if (safeFluidMove.equals(Vec3.ZERO)) {
+                mob.setDeltaMovement(0.0D, yVel, 0.0D);
+            } else {
+                mob.setDeltaMovement(safeFluidMove.x, yVel, safeFluidMove.z);
+            }
             mob.hasImpulse = true;
             faceTarget(mob, target);
             return;
