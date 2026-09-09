@@ -62,6 +62,11 @@ public class OvomorphosisConfig {
         @Configurable
         @Configurable.Synchronized
         public boolean disableInfectionScannerTimeOutput = true;
+
+        @Configurable
+        @Configurable.Synchronized
+        @Configurable.DecimalRange(min = 0.0D)
+        public float infectionScannerSoundVolume = 0.6F;
     }
 
     @Configurable

@@ -67,7 +67,7 @@ public class InfectionScannerItem extends Item {
             player.blockPosition(),
             SoundEvents.NOTE_BLOCK_PLING.value(),
             SoundSource.PLAYERS,
-            0.6F,
+            CommonMod.getConfig().itemConfigs.infectionScannerSoundVolume,
             0.7F
         );
 
@@ -118,7 +118,7 @@ public class InfectionScannerItem extends Item {
                 player.blockPosition(),
                 SoundEvents.NOTE_BLOCK_PLING.value(),
                 SoundSource.PLAYERS,
-                0.4F,
+                CommonMod.getConfig().itemConfigs.infectionScannerSoundVolume,
                 2.0F
             );
         }
@@ -241,7 +241,7 @@ public class InfectionScannerItem extends Item {
                 scanner.blockPosition(),
                 SoundEvents.NOTE_BLOCK_PLING.value(),
                 SoundSource.PLAYERS,
-                0.8F,
+                CommonMod.getConfig().itemConfigs.infectionScannerSoundVolume,
                 0.5F
             );
         } else {
@@ -265,7 +265,7 @@ public class InfectionScannerItem extends Item {
                 scanner.blockPosition(),
                 SoundEvents.NOTE_BLOCK_PLING.value(),
                 SoundSource.PLAYERS,
-                0.6F,
+                CommonMod.getConfig().itemConfigs.infectionScannerSoundVolume,
                 1.5F
             );
         }
