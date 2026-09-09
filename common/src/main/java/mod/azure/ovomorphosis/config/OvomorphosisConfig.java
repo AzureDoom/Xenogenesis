@@ -10,14 +10,6 @@ public class OvomorphosisConfig {
 
     @Configurable
     @Configurable.Synchronized
-    public boolean enablePathfindingDebug = false;
-
-    @Configurable
-    @Configurable.Synchronized
-    public boolean enableAiDiagnostics = false;
-
-    @Configurable
-    @Configurable.Synchronized
     public boolean enableIncrementalPathfinding = true;
 
     @Configurable
